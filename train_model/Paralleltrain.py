@@ -39,7 +39,7 @@ def evaluate_model(model, dataloader, device, writer, prefix, epoch):
     return ac, ap, -ac
 
 def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
-    model = nn.DataParallel(model)  # 包装模型以使用 DataParallel
+    model = nn.DataParallel(model)
     model.to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
@@ -98,19 +98,16 @@ def train_model(model, train_dataloader, test_dataloader, epochs, device, save_p
     else:
         print('No better model found.')
 
-# 创建数据集实例
 train_dataset = TrainDataset(is_train=True, args={'data_path': '/home/pc/code/ljp/clipdetectiondataset/train'})
 test_dataset = TestDataset(is_train=False, args={'data_path': '/home/pc/code/ljp/clipdetectiondataset/val', 'eval_data_path': '/home/pc/code/ljp/clipdetectiondataset/val'})
 
-# 创建DataLoader
 train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
 test_dataloader = DataLoader(test_dataset, batch_size=64, shuffle=False)
 
-# 选择设备
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 if torch.cuda.device_count() > 1:
     print(f"Using {torch.cuda.device_count()} GPUs!")
-    device = torch.device("cuda:0")  # 设置默认设备为第一个GPU
+    device = torch.device("cuda:0")
 
 pretrained_weights_path = '../weights/open_clip_pytorch_model.bin'
 model = OpenClipLinear(normalize=True, next_to_last=True, pretrained_model_path=pretrained_weights_path)

@@ -13,24 +13,9 @@ from tqdm import tqdm
 from clipfordetectiondata.datasets import TestDataset1
 from models.clipnet_dyn import DynFakeDetector
 
-# 사용할 물리 GPU 번호 지정 (서버에서 쓰고 싶은 GPU 번호로 변경)
-# CUDA_VISIBLE_DEVICES 설정 이후에는 항상 논리적으로 cuda:0 이 되므로
-# device는 반드시 "cuda:0" 으로 고정해야 함
 os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
-
-# ============================================================================
-# 평가 함수
-# ============================================================================
-
 def evaluate_model(model, dataloader, device, conf_threshold=None):
-    """
-    Parameters
-    ----------
-    conf_threshold : float | None
-        None 이면 model.conf_threshold 그대로 사용.
-        값을 넘기면 그 값으로 덮어씀 (threshold sweep 실험용).
-    """
     if conf_threshold is not None:
         model.conf_threshold = conf_threshold
 
@@ -39,13 +24,13 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
     predictions, labels, probabilities = [], [], []
     total_loss    = 0.0
     total_samples = 0
-    artifact_only = 0   # early-exit 으로 artifact만 사용된 샘플 수
+    artifact_only = 0
 
     folder_accuracies    = {}
     folder_probabilities = {}
     folder_labels        = {}
     folder_predictions   = {}
-    folder_semantic      = {}  # 폴더별 {semantic_called, total} 카운터
+    folder_semantic      = {}
 
     criterion = torch.nn.BCEWithLogitsLoss()
 
@@ -55,30 +40,25 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
         ):
             inputs, targets = inputs.to(device), targets.to(device)
 
-            # ── Early-exit 여부를 직접 추적하는 infer ────────────────────
             artifact_feat = model.artifact_branch.encode(inputs)
             pred_artifact = model.artifact_branch.classifier(artifact_feat)
 
             prob_art    = torch.sigmoid(pred_artifact)
-            confidence  = (prob_art - 0.5).abs() * 2          # [B,1] ∈ [0,1]
+            confidence  = (prob_art - 0.5).abs() * 2
 
-            # 샘플별로 semantic 호출 여부 기록 ([B] bool 텐서)
-            needs_semantic = (confidence.squeeze(1) < model.conf_threshold)  # [B]
+            needs_semantic = (confidence.squeeze(1) < model.conf_threshold)
 
             if not needs_semantic.any():
-                # 배치 전체 early-exit
                 outputs = pred_artifact
                 artifact_only += targets.size(0)
             else:
-                # Semantic branch 실행 후 gate 가중합
                 pred_semantic = model.semantic_branch(inputs)
                 gate_logits   = model.gate(artifact_feat)
                 weight        = torch.softmax(
                     gate_logits / model.temp, dim=-1
-                )                                              # [B,2]
+                )
                 outputs = (weight[:, 0:1] * pred_artifact
                          + weight[:, 1:2] * pred_semantic)
-                # early-exit된 샘플 수만큼 차감
                 artifact_only += (~needs_semantic).sum().item()
 
             outputs = outputs.squeeze()
@@ -92,9 +72,7 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
             labels.extend(targets.cpu().numpy())
             probabilities.extend(batch_probs)
 
-            # 폴더별 통계 수집
             for i, folder_name in enumerate(folder_names):
-                # accuracy_0 / accuracy_1 카운터
                 if folder_name not in folder_accuracies:
                     folder_accuracies[folder_name] = {
                         "correct_0": 0, "total_0": 0,
@@ -109,7 +87,6 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
                     if predicted[i].item() == 1:
                         folder_accuracies[folder_name]["correct_1"] += 1
 
-                # AP / total accuracy 계산용
                 if folder_name not in folder_probabilities:
                     folder_probabilities[folder_name] = []
                     folder_labels[folder_name]        = []
@@ -118,7 +95,6 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
                 folder_labels[folder_name].append(targets[i].item())
                 folder_predictions[folder_name].append(predicted[i].item())
 
-                # 폴더별 semantic 호출 카운터
                 if folder_name not in folder_semantic:
                     folder_semantic[folder_name] = {"semantic_called": 0, "total": 0}
                 folder_semantic[folder_name]["total"] += 1
@@ -130,7 +106,6 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
     avg_loss          = total_loss / len(dataloader)
     semantic_ratio    = 1.0 - artifact_only / max(total_samples, 1)
 
-    # 폴더별 AP / Total Accuracy
     folder_aps              = {}
     folder_total_accuracies = {}
     for folder_name in folder_probabilities:
@@ -150,11 +125,6 @@ def evaluate_model(model, dataloader, device, conf_threshold=None):
         average_precision, folder_aps, folder_total_accuracies,
         semantic_ratio, folder_semantic,
     )
-
-
-# ============================================================================
-# 테스트 함수
-# ============================================================================
 
 def test_model(model, dataloader, device, conf_threshold=None, save_path=None):
     (
@@ -184,7 +154,6 @@ def test_model(model, dataloader, device, conf_threshold=None, save_path=None):
             f"Semantic={sem_r * 100:.1f}%"
         )
 
-    # ── 데이터셋별 성능 막대그래프 ────────────────────────────────────────
     if save_path is not None:
         _plot_per_dataset(
             folder_accuracies, folder_aps, folder_total_accuracies,
@@ -192,7 +161,6 @@ def test_model(model, dataloader, device, conf_threshold=None, save_path=None):
             save_path=save_path,
             filename="per_dataset_performance.png",
         )
-
 
 def _plot_per_dataset(
     folder_accuracies, folder_aps, folder_total_accuracies,
@@ -217,7 +185,6 @@ def _plot_per_dataset(
     fig, axes = plt.subplots(3, 1, figsize=(max(10, len(folders) * 0.9), 14))
     fig.suptitle("Per-Dataset Performance", fontsize=14, fontweight="bold")
 
-    # ── 1. Accuracy (real / fake / total) ────────────────────────────────
     ax = axes[0]
     ax.bar(x - width, acc_real,  width, label="Acc (real)",  color="steelblue",  alpha=0.85)
     ax.bar(x,         acc_fake,  width, label="Acc (fake)",  color="darkorange", alpha=0.85)
@@ -231,7 +198,6 @@ def _plot_per_dataset(
     ax.legend(fontsize=8)
     ax.grid(axis="y", linestyle="--", alpha=0.5)
 
-    # ── 2. Average Precision ─────────────────────────────────────────────
     ax = axes[1]
     bars = ax.bar(x, aps, width * 1.5, color="mediumpurple", alpha=0.85)
     ax.axhline(overall_ap, color="mediumpurple", linestyle="--", linewidth=1.2,
@@ -246,7 +212,6 @@ def _plot_per_dataset(
     ax.legend(fontsize=8)
     ax.grid(axis="y", linestyle="--", alpha=0.5)
 
-    # ── 3. Semantic Branch Called (%) ─────────────────────────────────────
     ax = axes[2]
     bars = ax.bar(x, [r * 100 for r in sem_ratios], width * 1.5,
                   color="salmon", alpha=0.85)
@@ -268,28 +233,21 @@ def _plot_per_dataset(
     plt.savefig(out_path, dpi=300, bbox_inches="tight")
     print(f"\nPer-dataset plot saved → {out_path}")
 
-
-# ============================================================================
-# 진입점
-# ============================================================================
-
 if __name__ == "__main__":
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # ── 모델 로드 ────────────────────────────────────────────────────────
     model_save_path = "/home/work/ktg0829/final_project/clipforfakedetection/weights/model_save/best_model_20260603-074224.pth"
 
     model = DynFakeDetector(
         pretrained_model_path="/home/work/ktg0829/final_project/clipforfakedetection/weights/open_clip_pytorch_model.bin",
         normalize=True,
-        next_to_last=False,   # 학습 당시와 동일하게 맞춰야 함 (proj 포함, dim=768)
-        conf_threshold=0.8,   # 추론 시 early-exit 기준값 (아래서 재설정 가능)
+        next_to_last=False,
+        conf_threshold=0.8,
     )
     model.load_state_dict(torch.load(model_save_path, map_location=device))
     model.to(device)
 
-    # ── 데이터 ───────────────────────────────────────────────────────────
     test_dataset = TestDataset1(
         is_train=False,
         args={
@@ -299,19 +257,14 @@ if __name__ == "__main__":
     )
     test_dataloader = DataLoader(test_dataset, batch_size=32, shuffle=False)
 
-    # 그래프 저장 경로 = 모델 저장 폴더와 동일
     plot_save_path = os.path.dirname(model_save_path)
 
-    # ── 기본 테스트 + 데이터셋별 그래프 ─────────────────────────────────
-    # test_model(model, test_dataloader, device, save_path=plot_save_path)
-
-    # ── conf_threshold sweep + 결과 저장 ────────────────────────────────
     print("\n" + "=" * 70)
     print("Threshold sweep (0.0 ~ 1.0, step 0.1)")
     print("=" * 70)
 
     sweep_results = []
-    thresholds = [round(t * 0.1, 1) for t in range(0, 11)]  # 0.0 ~ 1.0
+    thresholds = [round(t * 0.1, 1) for t in range(0, 11)]
 
     for thr in thresholds:
         (acc, folder_accuracies, loss, ap, folder_aps,
@@ -331,8 +284,7 @@ if __name__ == "__main__":
             "semantic_called":   round(sem_ratio, 6),
         })
 
-        # threshold별 per_dataset 그래프 저장
-        thr_tag = f"{thr:.1f}".replace(".", "")   # 0.1 → "01", 1.0 → "10"
+        thr_tag = f"{thr:.1f}".replace(".", "")
         _plot_per_dataset(
             folder_accuracies, folder_aps, folder_total_accuracies,
             folder_semantic, acc, ap,
@@ -340,13 +292,11 @@ if __name__ == "__main__":
             filename=f"per_dataset_th{thr_tag}.png",
         )
 
-    # JSON 저장
     json_path = os.path.join(plot_save_path, "sweep_results3.json")
     with open(json_path, "w") as f:
         json.dump(sweep_results, f, indent=2)
     print(f"\nSweep results saved → {json_path}")
 
-    # CSV 저장
     csv_path = os.path.join(plot_save_path, "sweep_results3.csv")
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(
@@ -356,12 +306,9 @@ if __name__ == "__main__":
         writer.writerows(sweep_results)
     print(f"Sweep results saved → {csv_path}")
 
-    # sweep 그래프 (plot_sweep.py 대신 여기서도 바로 생성)
     _plot_sweep(sweep_results, plot_save_path)
 
-
 def _plot_sweep(sweep_results: list, save_path: str):
-    """sweep_results 리스트로 conf_threshold vs 지표 그래프 생성."""
     import pandas as pd
     df = pd.DataFrame(sweep_results)
     x  = df["conf_threshold"]

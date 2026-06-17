@@ -1,604 +1,128 @@
-import torch
-import torch.optim as optim
-import torch.nn as nn
-from clipforfakedetection.clipfordetectiondata.datasets import TestDataset, TrainDataset
-from clipforfakedetection.train_model.earlystop import EarlyStopping
-from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, average_precision_score
-from datetime import datetime
+import argparse
 import os
-from torch.utils.tensorboard import SummaryWriter
-from  clipforfakedetection.models.clipnet import OpenClipLinear
-from tqdm import tqdm
+import sys
 from collections import defaultdict
-# 指定使用GPU 0
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
-# def evaluate_model(model, dataloader, device, writer, prefix, epoch):
-#     model.eval()
-#     predictions = []
-#     labels = []
-#     total_loss = 0
-#
-#     with torch.no_grad():
-#         # 使用tqdm包装dataloader
-#         dataloader = tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Evaluating Epoch {epoch+1}')
-#         for batch_idx, (inputs, targets) in dataloader:
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             outputs = model(inputs).squeeze()
-#             loss = nn.BCEWithLogitsLoss()(outputs, targets.float())
-#             total_loss += loss.item()
-#
-#             predicted = (outputs > 0.5).float()
-#             predictions.extend(predicted.cpu().numpy())
-#             labels.extend(targets.cpu().numpy())
-#
-#             # 更新tqdm进度条
-#             dataloader.set_postfix(loss=loss.item())
-#
-#     ac = accuracy_score(labels, predictions)
-#     ap = average_precision_score(labels, predictions)
-#     loss = total_loss / len(dataloader)
-#
-#     # 记录到TensorBoard
-#     writer.add_scalar(f'{prefix}/loss', loss, epoch)
-#     writer.add_scalar(f'{prefix}/accuracy', ac, epoch)
-#     writer.add_scalar(f'{prefix}/average_precision', ap, epoch)
-#
-#     return ac, ap, -ac  # 返回负的准确率，因为EarlyStopping类中使用的是val_loss
-#
-#
-# def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
-#     model.to(device)
-#     criterion = nn.BCEWithLogitsLoss()
-#     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
-#     model.freeze_clip()
-#
-#     best_ac = 0
-#     best_model_state = None
-#     early_stopping = EarlyStopping(patience=5, verbose=True)
-#
-#     # 创建TensorBoard writer
-#     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-#     train_log_dir = os.path.join(save_path, f"train_log{current_time}")
-#     eval_log_dir = os.path.join(save_path, f"eval_log{current_time}")
-#     train_writer = SummaryWriter(train_log_dir)
-#     eval_writer = SummaryWriter(eval_log_dir)
-#
-#     for epoch in range(epochs):
-#         model.train()
-#         running_loss = 0.0
-#         # 使用tqdm包装train_dataloader
-#         train_dataloader = tqdm(enumerate(train_dataloader), total=len(train_dataloader),
-#                                 desc=f'Epoch {epoch + 1}/{epochs}')
-#
-#         for batch_idx, (clipfordetectiondata, target) in train_dataloader:
-#             clipfordetectiondata, target = clipfordetectiondata.to(device), target.to(device)
-#             optimizer.zero_grad()
-#             output = model(clipfordetectiondata)
-#             loss = criterion(output.squeeze(), target.float())
-#             loss.backward()
-#             optimizer.step()
-#             running_loss += loss.item()
-#
-#             # 更新tqdm进度条
-#             train_dataloader.set_postfix(loss=loss.item())
-#
-#         epoch_loss = running_loss / len(train_dataloader)
-#         print(f'Epoch {epoch + 1}, Loss: {epoch_loss:.4f}')
-#
-#         # 记录训练损失到TensorBoard
-#         train_writer.add_scalar('training_loss', epoch_loss, epoch)
-#
-#         # Evaluate after each epoch
-#         ac, ap, val_loss = evaluate_model(model, test_dataloader, device, eval_writer, 'validation', epoch)
-#         print(f'Epoch {epoch + 1}, Test AC: {ac:.4f}, Test AP: {ap:.4f}')
-#
-#         # Save the best.pth model based on accuracy
-#         if ac > best_ac:
-#             best_ac = ac
-#             best_model_state = model.state_dict()
-#
-#         # 调用早停机制
-#         early_stopping(val_loss, model)
-#
-#         if early_stopping.early_stop:
-#             print("Early stopping")
-#             break
-#
-#     print('Finished Training')
-#     train_writer.close()
-#     eval_writer.close()
-#
-#     # Load the best.pth model state
-#     if best_model_state:
-#         model.load_state_dict(best_model_state)
-#         torch.save(model.state_dict(), f"{save_path}./weights/model_save/best_model.pth")
-#         print(f'Best Test AC: {best_ac:.4f}')
-#     else:
-#         print('No better model found.')
-# def evaluate_model(model, dataloader, device, writer, prefix, epoch):
-#     model.eval()
-#     predictions = []
-#     labels = []
-#     total_loss = 0
-#
-#     with torch.no_grad():
-#         # 使用tqdm包装dataloader，并确保正确解包inputs和targets
-#         for batch_idx, (inputs, targets) in tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Evaluating Epoch {epoch+1}'):
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             outputs = model(inputs).squeeze()
-#             loss = nn.BCEWithLogitsLoss()(outputs, targets.float())
-#             total_loss += loss.item()
-#
-#             predicted = (outputs > 0.5).float()
-#             predictions.extend(predicted.cpu().numpy())
-#             labels.extend(targets.cpu().numpy())
-#
-#     ac = accuracy_score(labels, predictions)
-#     ap = average_precision_score(labels, predictions)
-#     loss = total_loss / len(dataloader)
-#
-#     # 记录到TensorBoard
-#     writer.add_scalar(f'{prefix}/loss', loss, epoch)
-#     writer.add_scalar(f'{prefix}/accuracy', ac, epoch)
-#     writer.add_scalar(f'{prefix}/average_precision', ap, epoch)
-#
-#     return ac, ap, -ac  # 返回负的准确率，因为EarlyStopping类中使用的是val_loss
-#
-# def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
-#     model.to(device)
-#     criterion = nn.BCEWithLogitsLoss()
-#     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
-#     model.freeze_clip()
-#
-#     best_ac = 0
-#     best_model_state = None
-#     early_stopping = EarlyStopping(patience=5, verbose=True)
-#
-#     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-#     train_log_dir = os.path.join(save_path, f"train_log{current_time}")
-#     eval_log_dir = os.path.join(save_path, f"eval_log{current_time}")
-#     train_writer = SummaryWriter(train_log_dir)
-#     eval_writer = SummaryWriter(eval_log_dir)
-#
-#     for epoch in range(epochs):
-#         model.train()
-#         running_loss = 0.0
-#         total_batches = len(train_dataloader)
-#
-#         for batch_idx, (data, target) in tqdm(enumerate(train_dataloader), total=total_batches, desc=f'Epoch {epoch + 1}/{epochs}'):
-#             data, target = data.to(device), target.to(device)
-#             optimizer.zero_grad()
-#             output = model(data)
-#             loss = criterion(output.squeeze(), target.float())
-#             loss.backward()
-#             optimizer.step()
-#             running_loss += loss.item()
-#
-#         epoch_loss = running_loss / total_batches
-#         print(f'Epoch {epoch + 1}, Loss: {epoch_loss:.4f}')
-#
-#         train_writer.add_scalar('training_loss', epoch_loss, epoch)
-#
-#         ac, ap, val_loss = evaluate_model(model, test_dataloader, device, eval_writer, 'validation', epoch)
-#         print(f'Epoch {epoch + 1}, Test AC: {ac:.4f}, Test AP: {ap:.4f}')
-#
-#         if ac > best_ac:
-#             best_ac = ac
-#             best_model_state = model.state_dict()
-#
-#         early_stopping(val_loss, model)
-#
-#         if early_stopping.early_stop:
-#             print("Early stopping")
-#             break
-#
-#     print('Finished Training')
-#     train_writer.close()
-#     eval_writer.close()
-#
-#     if best_model_state:
-#         model.load_state_dict(best_model_state)
-#         model_save_path = f"{save_path}/best_model_{current_time}.pth"
-#         torch.save(model.state_dict(), model_save_path)
-#         print(f'Best Test AC: {best_ac:.4f}')
-#     else:
-#         print('No better model found.')
-# def evaluate_model(model, dataloader, device, writer, prefix, epoch):
-#     model.eval()
-#     predictions = []
-#     labels = []
-#     total_loss = 0
-#     folder_stats = defaultdict(lambda: {'predictions': [], 'labels': []})
-#
-#     with torch.no_grad():
-#         for batch_idx, (inputs, targets, folder_names) in tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Evaluating Epoch {epoch+1}'):
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             outputs = model(inputs).squeeze()
-#             loss = nn.BCEWithLogitsLoss()(outputs, targets.float())
-#             total_loss += loss.item()
-#
-#             predicted = (outputs > 0.5).float()
-#             predictions.extend(predicted.cpu().numpy())
-#             labels.extend(targets.cpu().numpy())
-#
-#             # 记录每个文件夹的预测结果和标签
-#             for folder_name, pred, label in zip(folder_names, predicted.cpu().numpy(), targets.cpu().numpy()):
-#                 folder_stats[folder_name]['predictions'].append(pred)
-#                 folder_stats[folder_name]['labels'].append(label)
-#
-#     ac = accuracy_score(labels, predictions)
-#     loss = total_loss / len(dataloader)
-#
-#     # 记录到TensorBoard
-#     writer.add_scalar(f'{prefix}/loss', loss, epoch)
-#     writer.add_scalar(f'{prefix}/accuracy', ac, epoch)
-#
-#
-#     # 输出每个文件夹的准确率以及每个文件夹下0和1的准确率
-#     for folder_name, stats in folder_stats.items():
-#         folder_predictions = stats['predictions']
-#         folder_labels = stats['labels']
-#         folder_ac = accuracy_score(folder_labels, folder_predictions)
-#         folder_ap = average_precision_score(folder_labels, folder_predictions)
-#
-#         # 计算每个文件夹下0和1的准确率
-#         folder_0_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 0]
-#         folder_0_labels = [0] * len(folder_0_predictions)
-#         folder_0_ac = accuracy_score(folder_0_labels, folder_0_predictions) if folder_0_labels else 0
-#
-#         folder_1_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 1]
-#         folder_1_labels = [1] * len(folder_1_predictions)
-#         folder_1_ac = accuracy_score(folder_1_labels, folder_1_predictions) if folder_1_labels else 0
-#
-#         print(f"Folder: {folder_name}, Accuracy: {folder_ac:.4f}, 0 Accuracy: {folder_0_ac:.4f}, 1 Accuracy: {folder_1_ac:.4f}")
-#
-#     return ac, ap, -ac  # 返回负的准确率，因为EarlyStopping类中使用的是val_loss
-#
-# def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
-#     model.to(device)
-#     criterion = nn.BCEWithLogitsLoss()
-#     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
-#     model.freeze_clip()
-#
-#     best_ac = 0
-#     best_model_state = None
-#     early_stopping = EarlyStopping(patience=5, verbose=True)
-#
-#     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-#     train_log_dir = os.path.join(save_path, f"train_log{current_time}")
-#     eval_log_dir = os.path.join(save_path, f"eval_log{current_time}")
-#     train_writer = SummaryWriter(train_log_dir)
-#     eval_writer = SummaryWriter(eval_log_dir)
-#
-#     for epoch in range(epochs):
-#         model.train()
-#         running_loss = 0.0
-#         total_batches = len(train_dataloader)
-#
-#         for batch_idx, (data, target) in tqdm(enumerate(train_dataloader), total=total_batches, desc=f'Epoch {epoch + 1}/{epochs}'):
-#             data, target = data.to(device), target.to(device)
-#             optimizer.zero_grad()
-#             output = model(data)
-#             loss = criterion(output.squeeze(), target.float())
-#             loss.backward()
-#             optimizer.step()
-#             running_loss += loss.item()
-#
-#         epoch_loss = running_loss / total_batches
-#         print(f'Epoch {epoch + 1}, Loss: {epoch_loss:.4f}')
-#
-#         train_writer.add_scalar('training_loss', epoch_loss, epoch)
-#
-#         ac, ap, val_loss = evaluate_model(model, test_dataloader, device, eval_writer, 'validation', epoch)
-#         print(f'Epoch {epoch + 1}, Test AC: {ac:.4f}, Test AP: {ap:.4f}')
-#
-#         if ac > best_ac:
-#             best_ac = ac
-#             best_model_state = model.state_dict()
-#
-#         early_stopping(val_loss, model)
-#
-#         if early_stopping.early_stop:
-#             print("Early stopping")
-#             break
-#
-#     print('Finished Training')
-#     train_writer.close()
-#     eval_writer.close()
-#
-#     if best_model_state:
-#         model.load_state_dict(best_model_state)
-#         model_save_path = f"{save_path}/best_model_{current_time}.pth"
-#         torch.save(model.state_dict(), model_save_path)
-#         print(f'Best Test AC: {best_ac:.4f}')
-#     else:
-#         print('No better model found.')
-#
-# # 假设您已经有了一个数据加载器
-# # dataloader = DataLoader(...)
-# # 创建数据集实例
-# train_dataset = TrainDataset(is_train=True, args={'data_path': '/home/ljp/code/clipdetectiondataset/train'})
-# test_dataset = TestDataset(is_train=False, args={'data_path': '/home/ljp/code/clipdetectiondataset/val','eval_data_path': '/home/ljp/code/clipdetectiondataset/val'})
-#
-# # 创建DataLoader
-# train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)  # 调整batch_size为您需要的大小
-# test_dataloader = DataLoader(test_dataset, batch_size=128, shuffle=False)  # 通常测试时不打乱数据
-# # 选择设备
-# device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-#
-# pretrained_weights_path = '../weights/open_clip_pytorch_model.bin'  # 替换为您的权重文件路径
-# # 加载预训练的 CLIP 模型
-# try:
-#     model_name = 'ViT-L-14'
-#     # 创建模型实例
-#     model = OpenClipLinear(normalize=True, next_to_last=True, pretrained_model_path=pretrained_weights_path)
-#     print(f"Loaded CLIP model: {model_name}")
-# except Exception as e:
-#                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             print(f"Error loading CLIP model: {e}")
-#
-#
-# save_path = '../weights/model_save'
-# # 调用训练函数
-# train_model(model, train_dataloader, test_dataloader, epochs=5, device=device, save_path=save_path)
-
-# def evaluate_model(model, dataloader, device, writer, prefix, epoch):
-#     model.eval()
-#     predictions = []
-#     labels = []
-#     total_loss = 0
-#     folder_stats = defaultdict(lambda: {'predictions': [], 'labels': []})
-#
-#     with torch.no_grad():
-#         for batch_idx, (inputs, targets, folder_names) in tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Evaluating Epoch {epoch+1}'):
-#             inputs, targets = inputs.to(device), targets.to(device)
-#             outputs = model(inputs).squeeze()
-#             loss = nn.BCEWithLogitsLoss()(outputs, targets.float())
-#             total_loss += loss.item()
-#
-#             predicted = (outputs > 0.5).float()
-#             predictions.extend(predicted.cpu().numpy())
-#             labels.extend(targets.cpu().numpy())
-#
-#             # 记录每个文件夹的预测结果和标签
-#             for folder_name, pred, label in zip(folder_names, predicted.cpu().numpy(), targets.cpu().numpy()):
-#                 folder_stats[folder_name]['predictions'].append(pred)
-#                 folder_stats[folder_name]['labels'].append(label)
-#
-#     ac = accuracy_score(labels, predictions)
-#     loss = total_loss / len(dataloader)
-#
-#     # 记录到TensorBoard
-#     writer.add_scalar(f'{prefix}/loss', loss, epoch)
-#     writer.add_scalar(f'{prefix}/accuracy', ac, epoch)
-#
-#     # 输出每个文件夹的准确率以及每个文件夹下0和1的准确率
-#     for folder_name, stats in folder_stats.items():
-#         folder_predictions = stats['predictions']
-#         folder_labels = stats['labels']
-#         folder_ac = accuracy_score(folder_labels, folder_predictions)
-#
-#         # 计算每个文件夹下0和1的准确率
-#         folder_0_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 0]
-#         folder_0_labels = [0] * len(folder_0_predictions)
-#         folder_0_ac = accuracy_score(folder_0_labels, folder_0_predictions) if folder_0_labels else 0
-#
-#         folder_1_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 1]
-#         folder_1_labels = [1] * len(folder_1_predictions)
-#         folder_1_ac = accuracy_score(folder_1_labels, folder_1_predictions) if folder_1_labels else 0
-#
-#         print(f"Folder: {folder_name}, Accuracy: {folder_ac:.4f}, 0 Accuracy: {folder_0_ac:.4f}, 1 Accuracy: {folder_1_ac:.4f}")
-#
-#     return ac, -ac  # 返回负的准确率，因为EarlyStopping类中使用的是val_loss
-#
-# def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
-#     model.to(device)
-#     criterion = nn.BCEWithLogitsLoss()
-#     optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
-#     model.freeze_clip()
-#
-#     best_ac = 0
-#     best_model_state = None
-#     early_stopping = EarlyStopping(patience=5, verbose=True)
-#
-#     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-#     train_log_dir = os.path.join(save_path, f"train_log{current_time}")
-#     eval_log_dir = os.path.join(save_path, f"eval_log{current_time}")
-#     train_writer = SummaryWriter(train_log_dir)
-#     eval_writer = SummaryWriter(eval_log_dir)
-#
-#     for epoch in range(epochs):
-#         model.train()
-#         running_loss = 0.0
-#         total_batches = len(train_dataloader)
-#
-#         for batch_idx, (data, target) in tqdm(enumerate(train_dataloader), total=total_batches, desc=f'Epoch {epoch + 1}/{epochs}'):
-#             data, target = data.to(device), target.to(device)
-#             optimizer.zero_grad()
-#             output = model(data)
-#             loss = criterion(output.squeeze(), target.float())
-#             loss.backward()
-#             optimizer.step()
-#             running_loss += loss.item()
-#
-#         epoch_loss = running_loss / total_batches
-#         print(f'Epoch {epoch + 1}, Loss: {epoch_loss:.4f}')
-#
-#         train_writer.add_scalar('training_loss', epoch_loss, epoch)
-#
-#         ac, val_loss = evaluate_model(model, test_dataloader, device, eval_writer, 'validation', epoch)
-#         print(f'Epoch {epoch + 1}, Test AC: {ac:.4f}')
-#
-#         if ac > best_ac:
-#             best_ac = ac
-#             best_model_state = model.state_dict()
-#
-#         early_stopping(val_loss, model)
-#
-#         if early_stopping.early_stop:
-#             print("Early stopping")
-#             break
-#
-#     print('Finished Training')
-#     train_writer.close()
-#     eval_writer.close()
-#
-#     if best_model_state:
-#         model.load_state_dict(best_model_state)
-#         model_save_path = f"{save_path}/best_model_{current_time}.pth"
-#         torch.save(model.state_dict(), model_save_path)
-#         print(f'Best Test AC: {best_ac:.4f}')
-#     else:
-#         print('No better model found.')
-# # 假设您已经有了一个数据加载器
-# # dataloader = DataLoader(...)
-# # 创建数据集实例
-# train_dataset = TrainDataset(is_train=True, args={'data_path': '/home/ljp/code/allgen/train'})
-# test_dataset = TestDataset(is_train=False, args={'data_path': '/home/ljp/code/allgen/val','eval_data_path': '/home/ljp/code/allgen/val'})
-#
-# # 创建DataLoader
-# train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)  # 调整batch_size为您需要的大小
-# test_dataloader = DataLoader(test_dataset, batch_size=128, shuffle=False)  # 通常测试时不打乱数据
-# # 选择设备
-# device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-#
-# pretrained_weights_path = '../weights/open_clip_pytorch_model.bin'  # 替换为您的权重文件路径
-# # 加载预训练的 CLIP 模型
-# try:
-#     model_name = 'ViT-L-14'
-#     # 创建模型实例
-#     model = OpenClipLinear(normalize=True, next_to_last=True, pretrained_model_path=pretrained_weights_path)
-#     print(f"Loaded CLIP model: {model_name}")
-# except Exception as e:
-#                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             print(f"Error loading CLIP model: {e}")
-#
-#
-# save_path = '../weights/model_save'
-# # 调用训练函数
-# train_model(model, train_dataloader, test_dataloader, epochs=5, device=device, save_path=save_path)
-
-import os
-import torch
-import json
-from torch.utils.data import DataLoader
-from sklearn.metrics import accuracy_score, average_precision_score
-from tqdm import tqdm
-from clipforfakedetection.clipfordetectiondata.datasets import TestDataset1
-from clipforfakedetection.models.clipnet import OpenClipLinear
-from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
-from collections import defaultdict
+from pathlib import Path
+
+import torch
 import torch.nn as nn
 import torch.optim as optim
-from clipforfakedetection.clipfordetectiondata.datasets import TrainDataset, TestDataset  # 确保正确导入数据集类
+from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
-# 评估模型函数
-def evaluate_model(model, dataloader, device, writer, prefix, epoch):
+from clipfordetectiondata.datasets import TestDataset, TrainDataset
+from models.clipnet import OpenClipLinear
+from models.clipnet_dyn import DynFakeDetector
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+class EarlyStopping:
+    def __init__(self, patience: int = 5, verbose: bool = False):
+        self.patience = patience
+        self.verbose = verbose
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+        self.val_loss_min = float("inf")
+
+    def __call__(self, val_loss, model):
+        score = -val_loss
+        if self.best_score is None:
+            self.best_score = score
+            self._save(val_loss, model)
+        elif score <= self.best_score:
+            self.counter += 1
+            print(f"EarlyStopping: {self.counter}/{self.patience}")
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            self.best_score = score
+            self._save(val_loss, model)
+            self.counter = 0
+
+    def _save(self, val_loss, model):
+        if self.verbose:
+            print(f"  Val improved ({self.val_loss_min:.6f} → {val_loss:.6f}). Saving...")
+        torch.save(model.state_dict(), "checkpoint.pth")
+        self.val_loss_min = val_loss
+
+def evaluate_baseline(model, dataloader, device, writer, prefix, epoch):
     model.eval()
-    predictions = []
-    labels = []
-    total_loss = 0
-    folder_stats = defaultdict(lambda: {'predictions': [], 'labels': []})
+    criterion = nn.BCEWithLogitsLoss()
+    predictions, labels = [], []
+    total_loss = 0.0
+    folder_stats = defaultdict(lambda: {"predictions": [], "labels": []})
 
     with torch.no_grad():
-        for batch_idx, (inputs, targets, folder_names) in tqdm(enumerate(dataloader), total=len(dataloader), desc=f'Evaluating Epoch {epoch+1}'):
+        for _, (inputs, targets, folder_names) in tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+            desc=f"Evaluating Epoch {epoch + 1}",
+        ):
             inputs, targets = inputs.to(device), targets.to(device)
             outputs = model(inputs).squeeze()
-            loss = nn.BCEWithLogitsLoss()(outputs, targets.float())
+            loss = criterion(outputs, targets.float())
             total_loss += loss.item()
 
             predicted = (outputs > 0.5).float()
             predictions.extend(predicted.cpu().numpy())
             labels.extend(targets.cpu().numpy())
 
-            # 记录每个文件夹的预测结果和标签
-            for folder_name, pred, label in zip(folder_names, predicted.cpu().numpy(), targets.cpu().numpy()):
-                folder_stats[folder_name]['predictions'].append(pred)
-                folder_stats[folder_name]['labels'].append(label)
+            for fn, p, l in zip(folder_names, predicted.cpu().numpy(), targets.cpu().numpy()):
+                folder_stats[fn]["predictions"].append(p)
+                folder_stats[fn]["labels"].append(l)
 
     ac = accuracy_score(labels, predictions)
     loss = total_loss / len(dataloader)
+    writer.add_scalar(f"{prefix}/loss", loss, epoch)
+    writer.add_scalar(f"{prefix}/accuracy", ac, epoch)
 
-    # 记录到TensorBoard
-    writer.add_scalar(f'{prefix}/loss', loss, epoch)
-    writer.add_scalar(f'{prefix}/accuracy', ac, epoch)
+    for fn, stats in folder_stats.items():
+        fp, fl = stats["predictions"], stats["labels"]
+        fac = accuracy_score(fl, fp)
+        f0p = [p for p, l in zip(fp, fl) if l == 0]
+        f1p = [p for p, l in zip(fp, fl) if l == 1]
+        f0ac = accuracy_score([0] * len(f0p), f0p) if f0p else 0.0
+        f1ac = accuracy_score([1] * len(f1p), f1p) if f1p else 0.0
+        print(f"    {fn}: AC={fac:.4f} | real={f0ac:.4f} | fake={f1ac:.4f}")
 
-    # 输出每个文件夹的准确率以及每个文件夹下0和1的准确率
-    for folder_name, stats in folder_stats.items():
-        folder_predictions = stats['predictions']
-        folder_labels = stats['labels']
-        folder_ac = accuracy_score(folder_labels, folder_predictions)
+    print(f"  [Eval] AC={ac:.4f}  loss={loss:.4f}")
+    return ac, -ac
 
-        # 计算每个文件夹下0和1的准确率
-        folder_0_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 0]
-        folder_0_labels = [0] * len(folder_0_predictions)
-        folder_0_ac = accuracy_score(folder_0_labels, folder_0_predictions) if folder_0_labels else 0
+def train_baseline(model, train_loader, val_loader, args, device):
+    from torch.utils.tensorboard import SummaryWriter
 
-        folder_1_predictions = [p for p, l in zip(folder_predictions, folder_labels) if l == 1]
-        folder_1_labels = [1] * len(folder_1_predictions)
-        folder_1_ac = accuracy_score(folder_1_labels, folder_1_predictions) if folder_1_labels else 0
-
-        print(f"Folder: {folder_name}, Accuracy: {folder_ac:.4f}, 0 Accuracy: {folder_0_ac:.4f}, 1 Accuracy: {folder_1_ac:.4f}")
-
-    return ac, -ac  # 返回负的准确率，因为EarlyStopping类中使用的是val_loss
-
-# 早停类
-class EarlyStopping:
-    def __init__(self, patience=5, verbose=False):
-        self.patience = patience
-        self.verbose = verbose
-        self.counter = 0
-        self.best_score = None
-        self.early_stop = False
-        self.val_loss_min = float('inf')
-
-    def __call__(self, val_loss, model):
-        score = -val_loss
-        if self.best_score is None:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model)
-        elif score < self.best_score:
-            self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
-            if self.counter >= self.patience:
-                self.early_stop = True
-        else:
-            self.best_score = score
-            self.save_checkpoint(val_loss, model)
-            self.counter = 0
-
-    def save_checkpoint(self, val_loss, model):
-        if self.verbose:
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
-        torch.save(model.state_dict(), 'checkpoint.pth')
-        self.val_loss_min = val_loss
-
-# 训练模型函数
-def train_model(model, train_dataloader, test_dataloader, epochs, device, save_path):
     model.to(device)
     criterion = nn.BCEWithLogitsLoss()
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=0.0001, weight_decay=0)
-    # model.freeze_clip()  # 如果您有这个方法，确保调用它来冻结CLIP部分
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+    if args.freeze_clip:
+        model.freeze_clip()
 
-    best_ac = 0
-    best_model_state = None
-    early_stopping = EarlyStopping(patience=5, verbose=True)
-
+    best_ac = 0.0
+    best_state = None
+    early_stopping = EarlyStopping(patience=args.patience, verbose=True)
     current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
-    train_log_dir = os.path.join(save_path, f"train_log{current_time}")
-    eval_log_dir = os.path.join(save_path, f"eval_log{current_time}")
-    train_writer = SummaryWriter(train_log_dir)
-    eval_writer = SummaryWriter(eval_log_dir)
+    os.makedirs(args.save_path, exist_ok=True)
 
-    # 确保保存路径存在
-    os.makedirs(save_path, exist_ok=True)
+    train_writer = SummaryWriter(os.path.join(args.save_path, f"train_log_{args.mode}_{current_time}"))
+    eval_writer = SummaryWriter(os.path.join(args.save_path, f"eval_log_{args.mode}_{current_time}"))
 
-    for epoch in range(epochs):
+    for epoch in range(args.epochs):
         model.train()
         running_loss = 0.0
-        total_batches = len(train_dataloader)
+        total_batches = len(train_loader)
 
-        for batch_idx, (data, target) in tqdm(enumerate(train_dataloader), total=total_batches, desc=f'Epoch {epoch + 1}/{epochs}'):
+        for _, (data, target) in tqdm(
+            enumerate(train_loader),
+            total=total_batches,
+            desc=f"Epoch {epoch + 1}/{args.epochs}",
+        ):
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(data)
@@ -608,65 +132,279 @@ def train_model(model, train_dataloader, test_dataloader, epochs, device, save_p
             running_loss += loss.item()
 
         epoch_loss = running_loss / total_batches
-        print(f'Epoch {epoch + 1}, Loss: {epoch_loss:.4f}')
+        print(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
+        train_writer.add_scalar("training_loss", epoch_loss, epoch)
 
-        train_writer.add_scalar('training_loss', epoch_loss, epoch)
+        ac, val_loss = evaluate_baseline(model, val_loader, device, eval_writer, "validation", epoch)
 
-        # 评估模型
-        ac, val_loss = evaluate_model(model, test_dataloader, device, eval_writer, 'validation', epoch)
-        print(f'Epoch {epoch + 1}, Test AC: {ac:.4f}')
+        ckpt = os.path.join(args.save_path, f"model_{args.mode}_epoch_{epoch + 1}_{current_time}.pth")
+        torch.save(model.state_dict(), ckpt)
 
-        # 保存当前模型的状态
-        model_save_path = os.path.join(save_path, f"model_epoch_{epoch+1}_{current_time}.pth")
-        torch.save(model.state_dict(), model_save_path)
-        print(f"Saved model for epoch {epoch+1} to {model_save_path}")
-
-        # 更新最佳模型
         if ac > best_ac:
             best_ac = ac
-            best_model_state = model.state_dict()
+            best_state = model.state_dict()
 
-        # 早停检查
         early_stopping(val_loss, model)
-
         if early_stopping.early_stop:
-            print("Early stopping")
+            print("Early stopping triggered.")
             break
 
-    print('Finished Training')
     train_writer.close()
     eval_writer.close()
 
-    # 保存最佳模型
-    if best_model_state:
-        model.load_state_dict(best_model_state)
-        best_model_save_path = os.path.join(save_path, f"best_model_{current_time}.pth")
-        torch.save(model.state_dict(), best_model_save_path)
-        print(f'Best Test AC: {best_ac:.4f}, saved to {best_model_save_path}')
+    if best_state:
+        model.load_state_dict(best_state)
+        best_path = os.path.join(args.save_path, f"best_model_{args.mode}_{current_time}.pth")
+        torch.save(model.state_dict(), best_path)
+        print(f"Best AC: {best_ac:.4f}  →  {best_path}")
     else:
-        print('No better model found.')
-# 创建数据集实例
-train_dataset = TrainDataset(is_train=True, args={'data_path': '/home/work/ktg0829/final_project/Dual-Path-AI-Generated-Image-Detection/trainset/'})
-test_dataset = TestDataset(is_train=False, args={'data_path': '/home/work/ktg0829/final_project/Dual-Path-AI-Generated-Image-Detection/valset/', 'eval_data_path': '/home/work/ktg0829/final_project/Dual-Path-AI-Generated-Image-Detection/valset/'})
+        print("No improved model found.")
 
-# 创建DataLoader
-train_dataloader = DataLoader(train_dataset, batch_size=128, shuffle=True)  # 调整batch_size为您需要的大小
-test_dataloader = DataLoader(test_dataset, batch_size=128, shuffle=False)  # 通常测试时不打乱数据
+def evaluate_dyn(model, dataloader, device, writer, prefix, epoch):
+    model.eval()
+    criterion = nn.BCEWithLogitsLoss()
+    predictions, labels = [], []
+    total_loss = 0.0
+    total_samples = 0
+    artifact_only = 0
+    folder_stats = defaultdict(lambda: {"predictions": [], "labels": []})
+    conf_log = []
 
-# 选择设备
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    def infer_with_tracking(x):
+        nonlocal artifact_only
+        if model.infer_mode == 1:
+            return model.artifact_branch(x)
+        if model.infer_mode == 2:
+            return model.semantic_branch(x)
 
-pretrained_weights_path = '../weights/open_clip_pytorch_model.bin'  # 替换为您的权重文件路径
+        artifact_feat = model.artifact_branch.encode(x)
+        pred_artifact = model.artifact_branch.classifier(artifact_feat)
+        prob = torch.sigmoid(pred_artifact)
+        confidence = (prob - 0.5).abs() * 2
+        conf_log.append(confidence.detach().cpu())
 
-# 加载预训练的 CLIP 模型
-try:
-    model_name = 'ViT-L-14'
-    # 创建模型实例
-    model = OpenClipLinear(normalize=True, next_to_last=True, pretrained_model_path=pretrained_weights_path)
-    print(f"Loaded CLIP model: {model_name}")
-except Exception as e:
-    print(f"Error loading CLIP model: {e}")
+        if (confidence >= model.conf_threshold).all():
+            artifact_only += pred_artifact.size(0)
+            return pred_artifact
 
-save_path = '../weights/model_save'
-# 调用训练函数
-train_model(model, train_dataloader, test_dataloader, epochs=5, device=device, save_path=save_path)
+        pred_semantic = model.semantic_branch(x)
+        if model.infer_mode == -1:
+            w = torch.full((artifact_feat.size(0), 2), 0.5, device=artifact_feat.device)
+        else:
+            gate_logits = model.gate(artifact_feat)
+            w = torch.softmax(gate_logits / model.temp, dim=-1)
+        return w[:, 0:1] * pred_artifact + w[:, 1:2] * pred_semantic
+
+    with torch.no_grad():
+        for _, (inputs, targets, folder_names) in tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+            desc=f"Evaluating Epoch {epoch + 1}",
+        ):
+            inputs, targets = inputs.to(device), targets.to(device)
+            outputs = infer_with_tracking(inputs).squeeze()
+            loss = criterion(outputs, targets.float())
+            total_loss += loss.item()
+            total_samples += targets.size(0)
+
+            predicted = (outputs > 0.5).float()
+            predictions.extend(predicted.cpu().numpy())
+            labels.extend(targets.cpu().numpy())
+
+            for fn, p, l in zip(folder_names, predicted.cpu().numpy(), targets.cpu().numpy()):
+                folder_stats[fn]["predictions"].append(p)
+                folder_stats[fn]["labels"].append(l)
+
+    ac = accuracy_score(labels, predictions)
+    loss = total_loss / len(dataloader)
+    semantic_ratio = 1.0 - artifact_only / max(total_samples, 1)
+    avg_conf = torch.cat(conf_log).mean().item() if conf_log else 0.0
+
+    writer.add_scalar(f"{prefix}/loss", loss, epoch)
+    writer.add_scalar(f"{prefix}/accuracy", ac, epoch)
+    writer.add_scalar(f"{prefix}/semantic_call_ratio", semantic_ratio, epoch)
+    writer.add_scalar(f"{prefix}/avg_confidence", avg_conf, epoch)
+
+    print(
+        f"  [Eval] AC={ac:.4f}  loss={loss:.4f}  "
+        f"semantic_called={semantic_ratio * 100:.1f}%  avg_conf={avg_conf:.4f}"
+    )
+
+    for fn, stats in folder_stats.items():
+        fp, fl = stats["predictions"], stats["labels"]
+        fac = accuracy_score(fl, fp)
+        f0p = [p for p, l in zip(fp, fl) if l == 0]
+        f1p = [p for p, l in zip(fp, fl) if l == 1]
+        f0ac = accuracy_score([0] * len(f0p), f0p) if f0p else 0.0
+        f1ac = accuracy_score([1] * len(f1p), f1p) if f1p else 0.0
+        print(f"    {fn}: AC={fac:.4f} | real={f0ac:.4f} | fake={f1ac:.4f}")
+
+    return ac, -ac
+
+def train_dyn(model, train_loader, val_loader, args, device):
+    from torch.utils.tensorboard import SummaryWriter
+
+    model.to(device)
+    criterion = nn.BCEWithLogitsLoss()
+    optimizer = optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+    )
+
+    best_ac = 0.0
+    best_state = None
+    early_stopping = EarlyStopping(patience=args.patience, verbose=True)
+    current_time = datetime.now().strftime("%Y%m%d-%H%M%S")
+    os.makedirs(args.save_path, exist_ok=True)
+
+    train_writer = SummaryWriter(os.path.join(args.save_path, f"train_log_{args.mode}_{current_time}"))
+    eval_writer = SummaryWriter(os.path.join(args.save_path, f"eval_log_{args.mode}_{current_time}"))
+
+    for epoch in range(args.epochs):
+        model.train()
+        running_total = running_bce = running_gate = 0.0
+        path_counts = [0, 0]
+        total_batches = len(train_loader)
+
+        for _, (data, target) in tqdm(
+            enumerate(train_loader),
+            total=total_batches,
+            desc=f"Epoch {epoch + 1}/{args.epochs}",
+        ):
+            data, target = data.to(device), target.to(device)
+            optimizer.zero_grad()
+
+            out, gate_reg_loss = model(data)
+            loss_bce = criterion(out.squeeze(), target.float())
+            loss = loss_bce + args.lossw * gate_reg_loss
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 8.0)
+            optimizer.step()
+
+            running_total += loss.item()
+            running_bce += loss_bce.item()
+            running_gate += gate_reg_loss.item()
+
+            with torch.no_grad():
+                model.eval()
+                af = model.artifact_branch.encode(data)
+                gw = torch.softmax(model.gate(af) / model.temp, dim=-1)
+                path_counts[0] += (gw[:, 0] > gw[:, 1]).sum().item()
+                path_counts[1] += (gw[:, 1] >= gw[:, 0]).sum().item()
+                model.train()
+
+        ep_total = running_total / total_batches
+        ep_bce = running_bce / total_batches
+        ep_gate = running_gate / total_batches
+        art_ratio = path_counts[0] / max(sum(path_counts), 1)
+
+        print(
+            f"Epoch {epoch + 1} | total={ep_total:.4f}  bce={ep_bce:.4f}  "
+            f"gate_reg={ep_gate:.4f}  artifact_preferred={art_ratio * 100:.1f}%"
+        )
+        train_writer.add_scalar("loss/total", ep_total, epoch)
+        train_writer.add_scalar("loss/bce", ep_bce, epoch)
+        train_writer.add_scalar("loss/gate_reg", ep_gate, epoch)
+        train_writer.add_scalar("gate/artifact_ratio", art_ratio, epoch)
+
+        ac, val_loss = evaluate_dyn(model, val_loader, device, eval_writer, "validation", epoch)
+
+        ckpt = os.path.join(args.save_path, f"model_{args.mode}_epoch_{epoch + 1}_{current_time}.pth")
+        torch.save(model.state_dict(), ckpt)
+
+        if ac > best_ac:
+            best_ac = ac
+            best_state = model.state_dict()
+
+        early_stopping(val_loss, model)
+        if early_stopping.early_stop:
+            print("Early stopping triggered.")
+            break
+
+    train_writer.close()
+    eval_writer.close()
+
+    if best_state:
+        model.load_state_dict(best_state)
+        best_path = os.path.join(args.save_path, f"best_model_{args.mode}_{current_time}.pth")
+        torch.save(model.state_dict(), best_path)
+        print(f"Best AC: {best_ac:.4f}  →  {best_path}")
+    else:
+        print("No improved model found.")
+
+def parse_args(argv=None):
+    p = argparse.ArgumentParser(
+        description="Train baseline (Dual-Path) or dyn (Gating) detector.",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    p.add_argument(
+        "--mode",
+        choices=["baseline", "dyn"],
+        required=True,
+        help="baseline: OpenClipLinear | dyn: DynFakeDetector (gating)",
+    )
+    p.add_argument("--gpu", type=str, default="0")
+    p.add_argument("--data-path", type=str, default=str(_ROOT / "trainset"))
+    p.add_argument("--val-path", type=str, default=str(_ROOT / "valset"))
+    p.add_argument("--weights", type=str, default=str(_ROOT / "weights" / "open_clip_pytorch_model.bin"))
+    p.add_argument("--save-path", type=str, default=str(_ROOT / "weights" / "model_save"))
+    p.add_argument("--epochs", type=int, default=5)
+    p.add_argument("--batch-size", type=int, default=128)
+    p.add_argument("--lr", type=float, default=1e-4)
+    p.add_argument("--weight-decay", type=float, default=0.0)
+    p.add_argument("--patience", type=int, default=5)
+    p.add_argument("--freeze-clip", action="store_true", help="Freeze CLIP backbone (baseline)")
+    p.add_argument("--next-to-last", action="store_true", help="Remove CLIP projection layer")
+
+    dyn = p.add_argument_group("dyn-only options")
+    dyn.add_argument("--lossw", type=float, default=0.01, help="Gate regularization weight")
+    dyn.add_argument("--temp", type=float, default=1.0, help="DiffSoftmax temperature")
+    dyn.add_argument("--hard-gate", action="store_true")
+    dyn.add_argument("--conf-threshold", type=float, default=0.8, help="Early-exit threshold")
+
+    return p.parse_args(argv)
+
+def build_model(args):
+    if args.mode == "baseline":
+        model = OpenClipLinear(
+            normalize=True,
+            next_to_last=args.next_to_last,
+            pretrained_model_path=args.weights,
+        )
+    else:
+        model = DynFakeDetector(
+            pretrained_model_path=args.weights,
+            temp=args.temp,
+            hard_gate=args.hard_gate,
+            freeze_clip=args.freeze_clip,
+            next_to_last=args.next_to_last,
+            conf_threshold=args.conf_threshold,
+        )
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"Mode: {args.mode} | Trainable params: {trainable / 1e6:.2f}M")
+    return model
+
+def main(argv=None):
+    args = parse_args(argv)
+    os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+
+    train_dataset = TrainDataset(is_train=True, args={"data_path": args.data_path})
+    val_dataset = TestDataset(
+        is_train=False,
+        args={"data_path": args.val_path, "eval_data_path": args.val_path},
+    )
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=0)
+
+    model = build_model(args)
+
+    if args.mode == "baseline":
+        train_baseline(model, train_loader, val_loader, args, device)
+    else:
+        train_dyn(model, train_loader, val_loader, args, device)
+
+if __name__ == "__main__":
+    main()
